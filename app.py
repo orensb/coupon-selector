@@ -5,7 +5,10 @@ from functools import wraps
 
 app = Flask(__name__)
 app.secret_key = secrets.token_hex(32)  # Generate a secret key for sessions
+init_families_db()
+
 FAMILIES_DB = 'families.db'  # Registry of all families
+
 
 def init_families_db():
     """Initialize the families registry database"""
@@ -331,6 +334,5 @@ def add_url():
     return jsonify({'message': 'URL added successfully'})
 
 if __name__ == '__main__':
-    init_families_db()
     app.run(debug=True, host='0.0.0.0', port=5000)
 
