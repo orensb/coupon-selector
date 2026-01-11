@@ -5,9 +5,7 @@ from functools import wraps
 
 app = Flask(__name__)
 app.secret_key = secrets.token_hex(32)  # Generate a secret key for sessions
-
 FAMILIES_DB = 'families.db'  # Registry of all families
-
 
 def init_families_db():
     """Initialize the families registry database"""
@@ -23,6 +21,7 @@ def init_families_db():
     conn.close()
 
 init_families_db()
+
 
 def sanitize_family_code(family_code):
     """Sanitize family code to prevent path traversal attacks"""
@@ -90,6 +89,8 @@ def family_exists(family_code):
     conn.close()
     return exists
 
+
+
 def require_auth(f):
     """Decorator to require authentication"""
     @wraps(f)
@@ -154,6 +155,23 @@ def get_urls():
     conn.close()
     return jsonify(urls)
 
+@app.route('/api/total', methods=['GET'])
+@require_auth
+def get_total_amount():
+    family_code = session['family_code']
+
+    conn = get_family_db(family_code)
+    c = conn.cursor()
+
+    c.execute('SELECT SUM(amount) FROM urls WHERE used = 0')
+    total = c.fetchone()[0] or 0
+
+    conn.close()
+
+    return jsonify({"total_amount": total})
+
+
+
 @app.route('/api/allurls', methods=['GET'])
 @require_auth
 def get_all_urls():
@@ -161,7 +179,7 @@ def get_all_urls():
     family_code = session['family_code']
     conn = get_family_db(family_code)
     c = conn.cursor()
-    c.execute('SELECT * FROM urls ORDER BY amount DESC')
+    c.execute('SELECT * FROM urls ORDER BY created_at DESC')
     urls = [dict(row) for row in c.fetchall()]
     conn.close()
     return jsonify(urls)
@@ -308,7 +326,7 @@ def remove_url():
     
     conn = get_family_db(family_code)
     c = conn.cursor()
-    c.execute('DELETE FROM urls WHERE id = ?', (url_id,))
+    c.execute('UPDATE urls SET used = 1 WHERE id = ?', (url_id,))
     conn.commit()
     conn.close()
     
