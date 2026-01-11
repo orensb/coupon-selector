@@ -5,7 +5,6 @@ from functools import wraps
 
 app = Flask(__name__)
 app.secret_key = secrets.token_hex(32)  # Generate a secret key for sessions
-init_families_db()
 
 FAMILIES_DB = 'families.db'  # Registry of all families
 
@@ -22,6 +21,8 @@ def init_families_db():
     ''')
     conn.commit()
     conn.close()
+
+init_families_db()
 
 def sanitize_family_code(family_code):
     """Sanitize family code to prevent path traversal attacks"""
