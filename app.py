@@ -1,27 +1,80 @@
-from flask import Flask, render_template, request, jsonify, redirect, url_for, session
-import sqlite3
+import os
+import psycopg2
+import psycopg2.extras
 import secrets
 from functools import wraps
+from flask import Flask, session, jsonify, request, redirect, url_for, render_template
+from dotenv import load_dotenv
+load_dotenv()  # This loads the .env file
+
+
+
+import os
+import psycopg2
+from urllib.parse import urlparse
 
 app = Flask(__name__)
 app.secret_key = secrets.token_hex(32)  # Generate a secret key for sessions
-FAMILIES_DB = 'families.db'  # Registry of all families
+
+
+# Use the Session pooler connection string with your actual password
+DATABASE_URL = os.environ.get("DATABASE_URL")
+
+if not DATABASE_URL:
+    raise ValueError("DATABASE_URL environment variable is not set")
+
+print(f"DATABASE_URL is set: {DATABASE_URL}")  # Don't print the actual URL
+
+
+def get_db_connection():
+    result = urlparse(DATABASE_URL)
+    return psycopg2.connect(
+        database=result.path[1:],
+        user=result.username,
+        password=result.password,
+        host=result.hostname,
+        port=result.port,
+        sslmode="require"
+    )
+
 
 def init_families_db():
     """Initialize the families registry database"""
-    conn = sqlite3.connect(FAMILIES_DB)
+    conn = get_db_connection()
     c = conn.cursor()
-    c.execute('''
+    c.execute("""
         CREATE TABLE IF NOT EXISTS families (
-            family_code TEXT PRIMARY KEY,
+            id SERIAL PRIMARY KEY,
+            family_code TEXT UNIQUE NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+
         )
-    ''')
+    """)
     conn.commit()
+    c.close()
     conn.close()
 
-init_families_db()
-
+def init_urls_table():
+    """Initialize the URLs table for all families"""
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS urls (
+            id SERIAL PRIMARY KEY,
+            family_id INTEGER NOT NULL,
+            url TEXT NOT NULL,
+            amount REAL NOT NULL,
+            used BOOLEAN DEFAULT FALSE,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            CONSTRAINT fk_family
+                FOREIGN KEY(family_id)
+                REFERENCES families(id)
+                ON DELETE CASCADE
+        )
+    """)
+    conn.commit()
+    c.close()
+    conn.close()
 
 
 def sanitize_family_code(family_code):
@@ -30,66 +83,44 @@ def sanitize_family_code(family_code):
     sanitized = ''.join(c for c in family_code if c.isalnum() or c in ['-', '_'])
     return sanitized[:50]  # Limit length
 
-def init_family_db(family_code):
-    """Initialize a family-specific database"""
-    family_code = sanitize_family_code(family_code)
-    db_path = f'family_{family_code}.db'
-    conn = sqlite3.connect(db_path)
-    c = conn.cursor()
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS urls (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            url TEXT NOT NULL,
-            amount REAL NOT NULL,
-            used INTEGER DEFAULT 0,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    
-    # Add 'used' column if it doesn't exist (for existing databases)
-    try:
-        c.execute('ALTER TABLE urls ADD COLUMN used INTEGER DEFAULT 0')
-    except sqlite3.OperationalError:
-        # Column already exists, ignore
-        pass
-    
-    conn.commit()
-    conn.close()
-
-def get_family_db(family_code):
-    """Get database connection for a specific family"""
-    family_code = sanitize_family_code(family_code)
-    db_path = f'family_{family_code}.db'
-    init_family_db(family_code)  # Ensure database exists
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    return conn
 
 def register_family(family_code):
     """Register a new family code"""
     family_code = sanitize_family_code(family_code)
-    conn = sqlite3.connect(FAMILIES_DB)
+    conn = get_db_connection()
     c = conn.cursor()
     try:
-        c.execute('INSERT INTO families (family_code) VALUES (?)', (family_code,))
+        c.execute('INSERT INTO families (family_code) VALUES (%s)', (family_code,))
         conn.commit()
         return True
-    except sqlite3.IntegrityError:
+    except psycopg2.errors.UniqueViolation:
         # Family already exists
+        conn.rollback()
         return False
     finally:
+        c.close()
         conn.close()
 
 def family_exists(family_code):
     """Check if a family code exists"""
     family_code = sanitize_family_code(family_code)
-    conn = sqlite3.connect(FAMILIES_DB)
+    conn = get_db_connection()
     c = conn.cursor()
-    c.execute('SELECT 1 FROM families WHERE family_code = ?', (family_code,))
-    exists = c.fetchone() is not None
+    c.execute('SELECT id FROM families WHERE family_code = %s', (family_code,))
+    row = c.fetchone()
+    c.close()
     conn.close()
-    return exists
+    return row[0] if row else None
 
+def get_family_id(family_code):
+    """Get family_id from family_code"""
+    return family_exists(family_code)
+
+def get_urls_cursor():
+    """Return connection and "RealDictCursor"""
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    return conn, cur
 
 
 def require_auth(f):
@@ -126,7 +157,6 @@ def login():
         # Auto-register family if it doesn't exist
         if not family_exists(family_code):
             register_family(family_code)
-            init_family_db(family_code)
         
         # Set session
         session['family_code'] = family_code
@@ -149,10 +179,10 @@ def logout():
 def get_urls():
     """Get all URLs that are not used"""
     family_code = session['family_code']
-    conn = get_family_db(family_code)
-    c = conn.cursor()
-    c.execute('SELECT * FROM urls WHERE used = 0 ORDER BY amount DESC')
-    urls = [dict(row) for row in c.fetchall()]
+    family_id = get_family_id(family_code)
+    conn, c = get_urls_cursor()
+    c.execute('SELECT * FROM urls WHERE family_id = %s AND used = FALSE ORDER BY amount DESC' , (family_id,))
+    urls = c.fetchall()
     conn.close()
     return jsonify(urls)
 
@@ -161,11 +191,11 @@ def get_urls():
 def get_total_amount():
     family_code = session['family_code']
 
-    conn = get_family_db(family_code)
-    c = conn.cursor()
+    family_id = get_family_id(family_code)
+    conn, c = get_urls_cursor()
 
-    c.execute('SELECT SUM(amount) FROM urls WHERE used = 0')
-    total = c.fetchone()[0] or 0
+    c.execute('SELECT SUM(amount) FROM urls WHERE family_id = %s AND used = FALSE' , (family_id,))
+    total = c.fetchone()['sum'] or 0
 
     conn.close()
 
@@ -178,10 +208,10 @@ def get_total_amount():
 def get_all_urls():
     """Get all URLs including used ones"""
     family_code = session['family_code']
-    conn = get_family_db(family_code)
-    c = conn.cursor()
-    c.execute('SELECT * FROM urls ORDER BY created_at DESC')
-    urls = [dict(row) for row in c.fetchall()]
+    family_id = get_family_id(family_code)
+    conn, c = get_urls_cursor()
+    c.execute('SELECT * FROM urls WHERE family_id = %s ORDER BY created_at DESC' , (family_id,))
+    urls = c.fetchall()
     conn.close()
     return jsonify(urls)
 
@@ -200,9 +230,8 @@ def upload_file():
         family_code = session['family_code']
         content = file.read().decode('utf-8')
         lines = content.strip().split('\n')
-        
-        conn = get_family_db(family_code)
-        c = conn.cursor()
+        family_id = get_family_id(family_code)
+        conn , c = get_urls_cursor()
         added_count = 0
         
         for line in lines:
@@ -218,7 +247,8 @@ def upload_file():
                     url = ' '.join(parts[1:])
                     
                     # Add to database (used defaults to 0)
-                    c.execute('INSERT INTO urls (url, amount, used) VALUES (?, ?, 0)', (url, amount))
+                    c.execute('INSERT INTO urls (url, amount, used, family_id) VALUES (%s, %s, FALSE, %s)',
+                              (url, amount, family_id))                    
                     added_count += 1
                 except ValueError:
                     continue
@@ -237,6 +267,7 @@ def use_amount():
     """Use amount - find and use URLs"""
     try:
         family_code = session['family_code']
+        family_id = get_family_id(family_code)
         data = request.json
         if not data:
             return jsonify({'error': 'No data provided'}), 400
@@ -246,12 +277,11 @@ def use_amount():
         if amount_needed <= 0:
             return jsonify({'error': 'Amount must be greater than 0'}), 400
         
-        conn = get_family_db(family_code)
-        c = conn.cursor()
+        conn , c = get_urls_cursor()
         
         # Get all unused URLs sorted by amount (descending) for greedy algorithm
-        c.execute('SELECT * FROM urls WHERE used = 0 AND amount > 0 ORDER BY amount DESC')
-        urls = [dict(row) for row in c.fetchall()]
+        c.execute('SELECT * FROM urls WHERE family_id = %s AND used = FALSE AND amount > 0 ORDER BY amount DESC' , (family_id,))
+        urls = c.fetchall()
         
         remaining = amount_needed
         used_urls = []
@@ -288,11 +318,11 @@ def use_amount():
         
         # Update database - mark fully used URLs
         # for url_id in to_mark_used:
-        #     c.execute('UPDATE urls SET used = 1 WHERE id = ?', (url_id,))
+        #     c.execute('UPDATE urls SET used = 1 WHERE id = %S', (url_id,))
         
         # # Update database - update partially used URLs
         # for new_amount, url_id in to_update:
-        #     c.execute('UPDATE urls SET amount = ? WHERE id = ?', (new_amount, url_id))
+        #     c.execute('UPDATE urls SET amount = %S WHERE id = %S', (new_amount, url_id))
         
         conn.commit()
         conn.close()
@@ -326,9 +356,9 @@ def remove_url():
     if not url_id:
         return jsonify({'error': 'ID required'}), 400
     
-    conn = get_family_db(family_code)
-    c = conn.cursor()
-    c.execute('UPDATE urls SET used = 1 WHERE id = ?', (url_id,))
+    family_id = get_family_id(family_code)
+    conn , c = get_urls_cursor()
+    c.execute('UPDATE urls SET used = True WHERE id = %s AND family_id = %s', (url_id,family_id))
     conn.commit()
     conn.close()
     
@@ -346,14 +376,15 @@ def add_url():
     if not url or amount <= 0:
         return jsonify({'error': 'Valid URL and amount required'}), 400
     
-    conn = get_family_db(family_code)
-    c = conn.cursor()
-    c.execute('INSERT INTO urls (url, amount, used) VALUES (?, ?, 0)', (url, amount))
+    family_id = get_family_id(family_code)
+    conn , c = get_urls_cursor()
+    c.execute('INSERT INTO urls (url, amount, used, family_id) VALUES (%s, %s, False, %s)', (url, amount,family_id))
     conn.commit()
     conn.close()
     
     return jsonify({'message': 'URL added successfully'})
 
 if __name__ == '__main__':
+    init_families_db()
+    init_urls_table()
     app.run(debug=True, host='0.0.0.0', port=5000)
-

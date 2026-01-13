@@ -1,4 +1,8 @@
 Flask==3.0.0
 Werkzeug==3.0.1
 gunicorn==21.2.0
+psycopg2-binary
+Flask
+psycopg2-binary
+python-dotenv
 
