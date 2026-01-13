@@ -158,6 +158,21 @@
             color: #764ba2;
             text-decoration: none;
         }
+        .green-square-btn {
+            width: 14px;
+            height: 14px;
+            background: green;
+            color: white;
+            border: none;
+            border-radius: 2px;
+            cursor: pointer;
+            margin-right: 6px;
+            padding: 0;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+
         
         .amount-text {
             color: #667eea;
@@ -218,6 +233,14 @@
             margin-bottom: 5px;
             background: white;
             border-radius: 5px;
+        }
+        .marked-btn{
+            background: green;
+            width: auto;
+            padding: 2px 4px;
+            font-size: 14px;
+            margin-left: 20px;
+
         }
         
         .empty-state {
@@ -402,7 +425,9 @@
                             
                             html += `<div class="used-url-item">
                                 <div><strong>Amount Used :</strong> ${item.amount} shekel</div>
-                                <div><strong>URL:</strong> <button class="url-text" onclick="openUrl('${item.url}')">${item.url}</button></div>
+                                <div><strong>URL:</strong> <button class="url-text" onclick="openUrl('${item.url}')">${item.url}</button>
+                                <button class="marked-btn" onclick="removeUrl(${item.id})" > ✔ </button>
+
                             </div>`;
                         });
                         html += '</div>';
@@ -419,6 +444,20 @@
             }
         }
         
+        // async function marked_used_url(id) {
+        //     const res = await fetch('/api/makred-used' , {
+        //         method: 'POSt',
+        //         headers: {'Content-Type': 'application/json'},
+        //         body: JSON.stringify({ id })
+        //     });
+            
+        //     if (res.ok) {
+        //         btn.innerText = '✔ Used';
+        //         btn.disabled = true;
+        //         btn.style.color = 'gray';
+        //     }
+        // }
+
         async function addUrl() {
             const urlInput = document.getElementById('url-input');
             const amountInput = document.getElementById('add-amount-input');

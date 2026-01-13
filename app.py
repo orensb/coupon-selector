@@ -20,7 +20,8 @@ def init_families_db():
     conn.commit()
     conn.close()
 
-init_families_db()
+    init_families_db()
+
 
 
 def sanitize_family_code(family_code):
@@ -286,12 +287,12 @@ def use_amount():
                 remaining = 0
         
         # Update database - mark fully used URLs
-        for url_id in to_mark_used:
-            c.execute('UPDATE urls SET used = 1 WHERE id = ?', (url_id,))
+        # for url_id in to_mark_used:
+        #     c.execute('UPDATE urls SET used = 1 WHERE id = ?', (url_id,))
         
-        # Update database - update partially used URLs
-        for new_amount, url_id in to_update:
-            c.execute('UPDATE urls SET amount = ? WHERE id = ?', (new_amount, url_id))
+        # # Update database - update partially used URLs
+        # for new_amount, url_id in to_update:
+        #     c.execute('UPDATE urls SET amount = ? WHERE id = ?', (new_amount, url_id))
         
         conn.commit()
         conn.close()
@@ -312,6 +313,7 @@ def use_amount():
         return jsonify({'error': f'Invalid amount: {str(e)}'}), 400
     except Exception as e:
         return jsonify({'error': f'Server error: {str(e)}'}), 500
+
 
 @app.route('/api/remove', methods=['POST'])
 @require_auth
