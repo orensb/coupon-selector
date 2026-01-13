@@ -336,7 +336,7 @@
                 Total: --
             </div>
             <div id="url-list" class="url-list">
-                <div class="empty-state">Loading...</div>
+                <div class="empty-state">Click For Urls</div>
             </div>
             
             <div style="margin-top: 15px; display: flex; gap: 10px; flex-wrap: wrap;">
@@ -349,7 +349,7 @@
     <script>
         // Load URLs on page load
         window.onload = function() {
-            loadUrls();
+            loadTotal();
         };
         
         function showMessage(elementId, message, isError = false) {
