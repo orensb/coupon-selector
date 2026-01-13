@@ -20,7 +20,7 @@ def init_families_db():
     conn.commit()
     conn.close()
 
-    init_families_db()
+init_families_db()
 
 
 
