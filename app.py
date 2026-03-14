@@ -136,7 +136,7 @@ def require_auth(f):
 def index():
     """Main page - redirect to login if not authenticated"""
     if 'family_code' not in session:
-        return redirect(url_for('login'))
+        return redirect(('login'))
     return render_template('index.html', family_code=session.get('family_code'))
 
 @app.route('/login', methods=['GET', 'POST'])
